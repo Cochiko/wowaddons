@@ -3,8 +3,12 @@
 ---------------
 local Locale = LibStub("AceLocale-3.0"):GetLocale("NameplateBoom")
 local clh = CombatLogHelper
-
 local NameplateBoom = LibStub("AceAddon-3.0"):NewAddon("NameplateBoom", "AceConsole-3.0", "AceEvent-3.0");
+
+local debugHelper = GetDebugHelper(function() return NameplateBoom.db.global.logLevel end)
+local info = debugHelper.Info
+local debug = debugHelper.Debug
+
 NameplateBoom.frame = CreateFrame("Frame", nil, UIParent);
 
 ---------------
@@ -19,6 +23,7 @@ ANIMATIONS["boom"] = "boom"
 local defaults = {
 	global = {
 		enabled = true, -- whether the addon should be enabled or not
+		logLevel = debugHelper.LogLevels.INFO,
 		animation = ANIMATIONS.boom -- the default animation
 	}
 }
@@ -49,7 +54,7 @@ function NameplateBoom:OnInitialize()
 		self:Disable();
 	end
 
-	print("NameplateBoom Initialized")
+	info("NameplateBoom Initialized")
 
 end
 
@@ -80,8 +85,7 @@ function NameplateBoom:NAME_PLATE_UNIT_ADDED(event, unitToken)
 
 	local namePlate = C_NamePlate.GetNamePlateForUnit(unitToken)
 	if namePlate then
-		print("found nameplate for: ".. unitToken)
-
+		debug("found nameplate for: ".. unitToken)
 	end
 end
 
@@ -91,13 +95,18 @@ function NameplateBoom:NAME_PLATE_UNIT_REMOVED(event, unitToken)
 	unitTokenToGuid[unitToken] = nil;
 	guidToUnitToken[guid] = nil;
 
-	print("removing nameplate for: "..unitToken)
+	debug("removing nameplate for: "..unitToken)
 	-- recycle any fontStrings attached to this unit
 	for fontString, _ in pairs(animating) do
 		if fontString.unit == unitToken then
 			-- recycleFontString(fontString);
 		end
 	end
+end
+
+function NameplateBoom:COMBAT_LOG_EVENT_UNFILTERED()
+	-- Not sure the return does anything here
+	return NameplateBoom:FilterCombatLogEvent(CombatLogGetCurrentEventInfo())
 end
 
 function NameplateBoom:FilterCombatLogEvent(_, clue, _, sourceGUID, _, sourceFlags, _, destGUID, _, _, _, ...)
@@ -135,6 +144,7 @@ function NameplateBoom:FilterCombatLogEvent(_, clue, _, sourceGUID, _, sourceFla
 	elseif isPetOrGuardianEvent(sourceFlags) then
 		local destUnit = guidToUnitToken[destGUID];
 		if destUnit then
+			-- Pet attack/spell successfully dealt damage
 			if isDamageEvent(clue) then
 				local spellName, amount, overkill, critical, spellId;
 				if isMeleeEvent(clue) then
@@ -213,7 +223,7 @@ function NameplateBoom:DamageEvent(guid, spellName, amount, overkill, school, is
 	end
 
 	-- color text
-	text = self:ColorText(text, guid, playerGUID, school, spellName);
+	text = self:ColorText(text, guid, playerGuid, school, spellName);
 
 	-- shrink small hits
 	if (self.db.global.sizing.smallHits or self.db.global.sizing.smallHitsHide) and playerGUID ~= guid then
@@ -271,8 +281,8 @@ local menu = {
 
 		enable = {
 			type = 'toggle',
-			name = Locale["Enable NameplateBoom"],
-			desc = Locale["If the addon is enabled."],
+			name = Locale["Enable NameplateBoom!!"],
+			desc = Locale["Whether to enable the addon."],
 			get = "IsEnabled",
 			set = function(_, newValue) if (not newValue) then NameplateBoom:Disable(); else NameplateBoom:Enable(); end end,
 			order = 4,
@@ -282,6 +292,7 @@ local menu = {
 		disableBlizzardFCT = {
 			type = 'toggle',
 			name = Locale["Enable BlizzardSCT"],
+			desc = Locale["Whether to enable Blizzard's SCT."],
 			get = function(_, newValue) return GetCVar("floatingCombatTextCombatDamage") == "1" end,
 			set = function(_, newValue)
 				if (newValue) then
@@ -292,6 +303,35 @@ local menu = {
 			end,
 			order = 5,
 			width = "full",
+		},
+
+		--enableDebug = {
+		--	type = 'toggle',
+		--	name = Locale["Enable Debug"],
+		--	desc = Locale["Whether to enable debug logs."],
+		--	get = function(_, newValue) return NameplateBoom.db.global.logLevel == debugHelper.LogLevels.DEBUG end,
+		--	set = function(_, isEnabled)
+		--		if isEnabled then
+		--			NameplateBoom.db.global.logLevel = debugHelper.LogLevels.DEBUG
+		--		else
+		--			NameplateBoom.db.global.logLevel = defaults.global.logLevel
+		--		end
+		--	end,
+		--	order = 6,
+		--	width = "full",
+		--},
+
+		logLevel = {
+			type = 'select',
+			name = Locale["Log Level"],
+			desc = Locale["Level of logs should be printed out in chat"],
+			get = function() return NameplateBoom.db.global.logLevel end,
+			set = function(_, newLevel) NameplateBoom.db.global.logLevel = newLevel end,
+			values = {
+				[debugHelper.LogLevels.INFO] = "Info",
+				[debugHelper.LogLevels.DEBUG] = "Debug",
+			},
+			order = 6,
 		},
 	},
 };
