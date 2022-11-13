@@ -1,0 +1,2 @@
+---@class AnimatingNamePlate
+local AnimatingNamePlate = {};

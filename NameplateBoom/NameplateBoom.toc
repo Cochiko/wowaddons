@@ -1,0 +1,14 @@
+## Interface: 100000
+## Version: 1.28
+## Title: NameplateBoom
+## Author: Cochiko
+## SavedVariables: NameplateBoomDB
+## Notes: Nameplate-based effects to add some oomph to combat.
+## OptionalDeps: Ace3, LibEasing
+
+embeds.xml
+Locales\locale.xml
+Types.lua
+CombatLogHelper.lua
+Animations.lua
+NameplateBoom.lua
