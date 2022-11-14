@@ -8,14 +8,43 @@ local NameplateBoom = LibStub("AceAddon-3.0"):NewAddon("NameplateBoom", "AceCons
 local debugHelper = GetDebugHelper(function() return NameplateBoom.db.global.logLevel end)
 local info = debugHelper.Info
 local debug = debugHelper.Debug
+local trace = debugHelper.Trace
+
+local animHelper = AnimationHelper
 
 NameplateBoom.frame = CreateFrame("Frame", nil, UIParent);
 
 ---------------
 -- CONSTANTS --
 ---------------
-local ANIMATIONS = {}
-ANIMATIONS["boom"] = "boom"
+local ANIMATIONS = {
+	["boom"] = "boom"
+}
+
+if not SCHOOL_MASK_PHYSICAL then -- XXX 9.1 PTR Support
+	SCHOOL_MASK_PHYSICAL = Enum.Damageclass.MaskPhysical
+	SCHOOL_MASK_HOLY = Enum.Damageclass.MaskHoly
+	SCHOOL_MASK_FIRE = Enum.Damageclass.MaskFire
+	SCHOOL_MASK_NATURE = Enum.Damageclass.MaskNature
+	SCHOOL_MASK_FROST = Enum.Damageclass.MaskFrost
+	SCHOOL_MASK_SHADOW = Enum.Damageclass.MaskShadow
+	SCHOOL_MASK_ARCANE = Enum.Damageclass.MaskArcane
+end
+
+local DAMAGE_TYPE_COLORS = {
+	[SCHOOL_MASK_PHYSICAL] = "FFFF00",
+	[SCHOOL_MASK_HOLY] = "FFE680",
+	[SCHOOL_MASK_FIRE] = "FF8000",
+	[SCHOOL_MASK_NATURE] = "4DFF4D",
+	[SCHOOL_MASK_FROST] = "80FFFF",
+	[SCHOOL_MASK_SHADOW] = "8080FF",
+	[SCHOOL_MASK_ARCANE] = "FF80FF",
+	[SCHOOL_MASK_FIRE + SCHOOL_MASK_FROST + SCHOOL_MASK_ARCANE + SCHOOL_MASK_NATURE + SCHOOL_MASK_SHADOW] = "A330C9", -- Chromatic
+	[SCHOOL_MASK_FIRE + SCHOOL_MASK_FROST + SCHOOL_MASK_ARCANE + SCHOOL_MASK_NATURE + SCHOOL_MASK_SHADOW + SCHOOL_MASK_HOLY] = "A330C9", -- Magic
+	[SCHOOL_MASK_PHYSICAL + SCHOOL_MASK_FIRE + SCHOOL_MASK_FROST + SCHOOL_MASK_ARCANE + SCHOOL_MASK_NATURE + SCHOOL_MASK_SHADOW + SCHOOL_MASK_HOLY] = "A330C9", -- Chaos
+	["melee"] = "FFFFFF",
+	["pet"] = "CC8400"
+};
 
 --------
 -- DB --
@@ -24,16 +53,17 @@ local defaults = {
 	global = {
 		enabled = true, -- whether the addon should be enabled or not
 		logLevel = debugHelper.LogLevels.INFO,
-		animation = ANIMATIONS.boom -- the default animation
+		animation = ANIMATIONS.boom,
 	}
-}
+} ---@type Database
 
 ------------
 -- LOCALS --
 ------------
 local playerGuid;
-local unitTokenToGuid = {}; -- table that maps unit ids (e.g. "nameplate1") to their GUID
-local guidToUnitToken = {}; -- table that maps GUIDs to their unit id
+local unitTokenToGuid = {}; ---@type table<string, string> table that maps unit ids (e.g. "nameplate1") to their GUID
+local guidToUnitToken = {}; ---@type table<string, string> table that maps GUIDs to their unit id
+local guidToNameplate = {}; ---@type table<string, NamePlateBase> table that maps GUIDs to their unit id
 local animating = {} ---@type AnimatingNamePlate[] table of frames currently animating
 
 ------------
@@ -41,7 +71,7 @@ local animating = {} ---@type AnimatingNamePlate[] table of frames currently ani
 ------------
 function NameplateBoom:OnInitialize()
 	-- setup db
-	self.db = LibStub("AceDB-3.0"):New("NameplateBoomDB", defaults, true);
+	self.db = LibStub("AceDB-3.0"):New("NameplateBoomDB", defaults, true); ---@type Database
 
 	-- setup chat commands
 	self:RegisterChatCommand("boom", "OpenMenu");
@@ -85,7 +115,8 @@ function NameplateBoom:NAME_PLATE_UNIT_ADDED(event, unitToken)
 
 	local namePlate = C_NamePlate.GetNamePlateForUnit(unitToken)
 	if namePlate then
-		debug("found nameplate for: ".. unitToken)
+		guidToNameplate[guid] = namePlate
+		trace("found nameplate for: ".. unitToken)
 	end
 end
 
@@ -94,8 +125,9 @@ function NameplateBoom:NAME_PLATE_UNIT_REMOVED(event, unitToken)
 
 	unitTokenToGuid[unitToken] = nil;
 	guidToUnitToken[guid] = nil;
+	guidToNameplate[guid] = nil;
 
-	debug("removing nameplate for: "..unitToken)
+	trace("removing nameplate for: "..unitToken)
 	-- recycle any fontStrings attached to this unit
 	for fontString, _ in pairs(animating) do
 		if fontString.unit == unitToken then
@@ -109,10 +141,13 @@ function NameplateBoom:COMBAT_LOG_EVENT_UNFILTERED()
 	return NameplateBoom:FilterCombatLogEvent(CombatLogGetCurrentEventInfo())
 end
 
-function NameplateBoom:FilterCombatLogEvent(_, clue, _, sourceGUID, _, sourceFlags, _, destGUID, _, _, _, ...)
-	if playerGuid == destGUID then return end -- Filter out events targeted at the player for now
-	if playerGuid == sourceGUID then
-		local destUnit = guidToUnitToken[destGUID];
+----------------
+-- COMBAT LOG --
+----------------
+function NameplateBoom:FilterCombatLogEvent(_, clue, _, sourceGuid, _, sourceFlags, _, destGuid, _, _, _, ...)
+	if playerGuid == destGuid then return end -- Filter out events targeted at the player for now
+	if playerGuid == sourceGuid then
+		local destUnit = guidToUnitToken[destGuid];
 		if destUnit then
 			-- Attack/spell successfully dealt damage
 			if clh.IsDamageEvent(clue) then
@@ -124,13 +159,13 @@ function NameplateBoom:FilterCombatLogEvent(_, clue, _, sourceGUID, _, sourceFla
 				else
 					spellId, spellName, _, amount, overkill, school, _, _, _, critical = ...;
 				end
-				self:DamageEvent(destGUID, spellName, amount, overkill, school, critical, spellId);
+				self:AnimateDamageEvent(destGuid, spellName, amount, overkill, school, critical, spellId);
 			-- Attack/Spell missed
 			elseif clh.IsMissEvent(clue) then
 				local spellName, missType, spellId;
 
 				if clh.IsMeleeEvent(clue) then
-					if destGUID == playerGuid then
+					if destGuid == playerGuid then
 						missType = ...;
 					else
 						missType = "melee";
@@ -138,23 +173,23 @@ function NameplateBoom:FilterCombatLogEvent(_, clue, _, sourceGUID, _, sourceFla
 				else
 					spellId, spellName, _, missType = ...;
 				end
-				self:MissEvent(destGUID, spellName, missType, spellId);
+				self:MissEvent(destGuid, spellName, missType, spellId);
 			end
 		end
-	elseif isPetOrGuardianEvent(sourceFlags) then
-		local destUnit = guidToUnitToken[destGUID];
+	elseif clh.IsPetOrGuardianEvent(sourceFlags) then
+		local destUnit = guidToUnitToken[destGuid];
 		if destUnit then
 			-- Pet attack/spell successfully dealt damage
-			if isDamageEvent(clue) then
+			if clh.IsDamageEvent(clue) then
 				local spellName, amount, overkill, critical, spellId;
-				if isMeleeEvent(clue) then
+				if clh.IsMeleeEvent(clue) then
 					spellName, amount, overkill, _, _, _, _, critical, _, _, _ = "pet", ...;
-				elseif isEnvironmentalEvent(clue) then
+				elseif clh.IsEnvironmentalEvent(clue) then
 					spellName, amount, overkill, _, _, _, _, critical= ...;
 				else
 					spellId, spellName, _, amount, overkill, _, _, _, _, critical = ...;
 				end
-				self:DamageEvent(destGUID, spellName, amount, overkill, "pet", critical, spellId);
+				self:AnimateDamageEvent(destGuid, spellName, amount, overkill, "pet", critical, spellId);
 			end
 		-- If we wanted to show pet miss events, it would be here in a separate elseif block
 		end
@@ -164,110 +199,38 @@ end
 ---------------
 -- ANIMATION --
 ---------------
-function NameplateBoom:DamageEvent(guid, spellName, amount, overkill, school, isCrit, spellId)
+function NameplateBoom:AnimateDamageEvent(destGuid, spellName, amount, overkill, school, isCrit, spellId)
 	local text, animation, pow, size, alpha;
+
 	local isAutoAttack = clh.IsAutoAttackSpell(spellName);
+
+	local nameplate = guidToNameplate[destGuid]
+	if not nameplate then return end
 
 	-- select an animation
 	if (isAutoAttack and isCrit) then
-		animation = defaults.global.animation
+		animation = defaults.global.defaultAnimation
 		pow = true;
 	elseif (isAutoAttack) then
-		animation = defaults.global.animation
+		animation = defaults.global.defaultAnimation
 		pow = false;
 	elseif (isCrit) then
-		animation = defaults.global.animation
+		animation = defaults.global.defaultAnimation
 		pow = true;
 	elseif (not isAutoAttack and not isCrit) then
-		animation = defaults.global.animation
+		animation = defaults.global.defaultAnimation
 		pow = false;
 	end
 
-	-- skip if this damage event is disabled
-	if (animation == "disabled") then
-		return;
-	end;
 
-	local unit = guidToUnit[guid];
-	local isTarget = unit and UnitIsUnit(unit, "target");
+	nameplate.UnitFrame.healthBar.border:SetVertexColor()
+	debug("damage! (isAutoAttack: "..tostring(isAutoAttack)..", pow: "..tostring(pow)..", spellName: "..spellName..")")
 
-	if (self.db.global.useOffTarget and not isTarget and playerGUID ~= guid) then
-		size = self.db.global.offTargetFormatting.size;
-		alpha = self.db.global.offTargetFormatting.alpha;
-	else
-		size = self.db.global.formatting.size;
-		alpha = self.db.global.formatting.alpha;
-	end
+	return
+end
 
-	-- truncate
-	if (self.db.global.truncate and amount >= 1000000 and self.db.global.truncateLetter) then
-		text = string.format("%.1fM", amount / 1000000);
-	elseif (self.db.global.truncate and amount >= 10000) then
-		text = string.format("%.0f", amount / 1000);
-
-		if (self.db.global.truncateLetter) then
-			text = text.."k";
-		end
-	elseif (self.db.global.truncate and amount >= 1000) then
-		text = string.format("%.1f", amount / 1000);
-
-		if (self.db.global.truncateLetter) then
-			text = text.."k";
-		end
-	else
-		if (self.db.global.commaSeperate) then
-			text = commaSeperate(amount);
-		else
-			text = tostring(amount);
-		end
-	end
-
-	-- color text
-	text = self:ColorText(text, guid, playerGuid, school, spellName);
-
-	-- shrink small hits
-	if (self.db.global.sizing.smallHits or self.db.global.sizing.smallHitsHide) and playerGUID ~= guid then
-		if (not lastDamageEventTime or (lastDamageEventTime + SMALL_HIT_EXPIRY_WINDOW < GetTime())) then
-			numDamageEvents = 0;
-			runningAverageDamageEvents = 0;
-		end
-
-		runningAverageDamageEvents = ((runningAverageDamageEvents*numDamageEvents) + amount)/(numDamageEvents + 1);
-		numDamageEvents = numDamageEvents + 1;
-		lastDamageEventTime = GetTime();
-
-		if ((not isCrit and amount < SMALL_HIT_MULTIPIER*runningAverageDamageEvents)
-				or (isCrit and amount/2 < SMALL_HIT_MULTIPIER*runningAverageDamageEvents)) then
-			if (self.db.global.sizing.smallHitsHide) then
-				-- skip this damage event, it's too small
-				return;
-			else
-				size = size * self.db.global.sizing.smallHitsScale;
-			end
-		end
-	end
-
-	-- embiggen crit's size
-	if (self.db.global.sizing.crits and isCrit) and playerGUID ~= guid then
-		if (isAutoAttack and not self.db.global.sizing.autoattackcritsizing) then
-			-- don't embiggen autoattacks
-			pow = false;
-		else
-			size = size * self.db.global.sizing.critsScale;
-		end
-	end
-
-	-- make sure that size is larger than 5
-	if (size < 5) then
-		size = 5;
-	end
-
-	if (overkill > 0 and self.db.global.shouldDisplayOverkill) then
-		text = self:ColorText(text.." Overkill("..overkill..")", guid, playerGUID, school, spellName);
-		self:DisplayTextOverkill(guid, text, size, animation, spellId, pow, spellName);
-	else
-		self:DisplayText(guid, text, size, animation, spellId, pow, spellName);
-	end
+function NameplateBoom:AnimateMissEvent(guid, spellName, amount, overkill, school, isCrit, spellId)
+	debug("miss!")
 end
 
 ------------------
@@ -330,6 +293,7 @@ local menu = {
 			values = {
 				[debugHelper.LogLevels.INFO] = "Info",
 				[debugHelper.LogLevels.DEBUG] = "Debug",
+				[debugHelper.LogLevels.TRACE] = "Trace",
 			},
 			order = 6,
 		},

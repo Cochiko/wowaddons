@@ -7,11 +7,20 @@
 local levels = {
     INFO = 1,
     DEBUG = 2,
+    TRACE = 3,
 }
 local helper = {
     LogLevels = levels,
 }
 local getLogLevel
+
+
+function helper.Info(msg)
+    local level = getLogLevel and tonumber(getLogLevel())
+    if level and level >= levels.INFO then
+        print(msg)
+    end
+end
 
 function helper.Debug(msg)
     local level = getLogLevel and tonumber(getLogLevel())
@@ -20,10 +29,10 @@ function helper.Debug(msg)
     end
 end
 
-function helper.Info(msg)
+function helper.Trace(msg)
     local level = getLogLevel and tonumber(getLogLevel())
-    if level and level >= levels.INFO then
-        print(msg)
+    if level and level >= levels.TRACE then
+        print("TRACE  "..msg)
     end
 end
 
