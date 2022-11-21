@@ -11,5 +11,5 @@ Locales\locale.xml
 Types.lua
 DebugHelper.lua
 CombatLogHelper.lua
-Animations.lua
+Animation.lua
 NameplateBoom.lua

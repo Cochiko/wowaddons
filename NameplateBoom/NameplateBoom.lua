@@ -5,7 +5,8 @@ local Locale = LibStub("AceLocale-3.0"):GetLocale("NameplateBoom")
 local clh = CombatLogHelper
 local NameplateBoom = LibStub("AceAddon-3.0"):NewAddon("NameplateBoom", "AceConsole-3.0", "AceEvent-3.0");
 
-local debugHelper = GetDebugHelper(function() return NameplateBoom.db.global.logLevel end)
+local debugHelper = GetDebugHelper(function() return NameplateBoom.db.global.LogLevel
+end)
 local info = debugHelper.Info
 local debug = debugHelper.Debug
 local trace = debugHelper.Trace
@@ -64,7 +65,7 @@ local playerGuid;
 local unitTokenToGuid = {}; ---@type table<string, string> table that maps unit ids (e.g. "nameplate1") to their GUID
 local guidToUnitToken = {}; ---@type table<string, string> table that maps GUIDs to their unit id
 local guidToNameplate = {}; ---@type table<string, NamePlateBase> table that maps GUIDs to their unit id
-local animating = {} ---@type AnimatingNamePlate[] table of frames currently animating
+local animatingNamePlates = {} ---@type table<NamePlateAnimation, boolean> table of jobs processing animation (one per nameplate)
 
 ------------
 -- EVENTS --
@@ -80,7 +81,7 @@ function NameplateBoom:OnInitialize()
 	self:RegisterMenu();
 
 	-- if the addon is turned off in db, turn it off
-	if (self.db.global.enabled == false) then
+	if (self.db.global.Enabled == false) then
 		self:Disable();
 	end
 
@@ -95,17 +96,17 @@ function NameplateBoom:OnEnable()
 	self:RegisterEvent("NAME_PLATE_UNIT_REMOVED");
 	self:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED");
 
-	self.db.global.enabled = true;
+	self.db.global.Enabled = true;
 end
 
 function NameplateBoom:OnDisable()
 	self:UnregisterAllEvents();
 
-	for fontString, _ in pairs(animating) do
+	for fontString, _ in pairs(animatingNamePlates) do
 		-- recycleFontString(fontString);
 	end
 
-	self.db.global.enabled = false;
+	self.db.global.Enabled = false;
 end
 function NameplateBoom:NAME_PLATE_UNIT_ADDED(event, unitToken)
 	local guid = UnitGUID(unitToken);
@@ -116,20 +117,20 @@ function NameplateBoom:NAME_PLATE_UNIT_ADDED(event, unitToken)
 	local namePlate = C_NamePlate.GetNamePlateForUnit(unitToken)
 	if namePlate then
 		guidToNameplate[guid] = namePlate
-		trace("found nameplate for: ".. unitToken)
+		trace("found nameplate for: ".. guid)
 	end
 end
 
 function NameplateBoom:NAME_PLATE_UNIT_REMOVED(event, unitToken)
 	local guid = unitTokenToGuid[unitToken];
 
+	trace("removing nameplate for: "..guid)
 	unitTokenToGuid[unitToken] = nil;
 	guidToUnitToken[guid] = nil;
 	guidToNameplate[guid] = nil;
 
-	trace("removing nameplate for: "..unitToken)
 	-- recycle any fontStrings attached to this unit
-	for fontString, _ in pairs(animating) do
+	for fontString, _ in pairs(animatingNamePlates) do
 		if fontString.unit == unitToken then
 			-- recycleFontString(fontString);
 		end
@@ -222,9 +223,19 @@ function NameplateBoom:AnimateDamageEvent(destGuid, spellName, amount, overkill,
 		pow = false;
 	end
 
+	local damageSchoolColorHex = DAMAGE_TYPE_COLORS[school]
+	local damageSchoolColorRgb = animHelper.HexToRGB(damageSchoolColorHex)
+	nameplate.UnitFrame.healthBar.border:SetVertexColor(damageSchoolColorRgb:Spread())
+	debug("damage! (isAutoAttack: "..tostring(isAutoAttack)..
+			", pow: "..tostring(pow)..
+			", spellName: "..tostring(spellName)..
+			", school: "..tostring(school)..
+			")")
 
-	nameplate.UnitFrame.healthBar.border:SetVertexColor()
-	debug("damage! (isAutoAttack: "..tostring(isAutoAttack)..", pow: "..tostring(pow)..", spellName: "..spellName..")")
+
+	if (NameplateBoom.frame:GetScript("OnUpdate") == nil) then
+		NameplateBoom.frame:SetScript("OnUpdate", AnimationOnUpdate);
+	end
 
 	return
 end
@@ -288,8 +299,9 @@ local menu = {
 			type = 'select',
 			name = Locale["Log Level"],
 			desc = Locale["Level of logs should be printed out in chat"],
-			get = function() return NameplateBoom.db.global.logLevel end,
-			set = function(_, newLevel) NameplateBoom.db.global.logLevel = newLevel end,
+			get = function() return NameplateBoom.db.global.LogLevel
+			end,
+			set = function(_, newLevel) NameplateBoom.db.global.LogLevel = newLevel end,
 			values = {
 				[debugHelper.LogLevels.INFO] = "Info",
 				[debugHelper.LogLevels.DEBUG] = "Debug",

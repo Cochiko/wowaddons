@@ -1,13 +1,9 @@
----@class AnimatingNamePlate
-local AnimatingNamePlate = {};
-
-
 ---@class Database
 ---@field global DatabaseGlobal
 local Database = {};
 
 ---@class DatabaseGlobal
----@field enabled boolean
----@field logLevel number
----@field animation string
+---@field Enabled boolean
+---@field LogLevel number
+---@field Animation string
 local DatabaseGlobal = {};

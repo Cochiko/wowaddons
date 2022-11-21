@@ -4,10 +4,169 @@
 --- DateTime: 11/13/2022 12:51 PM
 ---
 
+-----------
+-- TYPES --
+-----------
+---@class RGBColor
+---@field R number
+---@field G number
+---@field B number
+local RGBColor = {};
+function RGBColor:Spread()
+    return self.R, self.G, self.B
+end
+
+---@param o RGBColor
+function RGBColor:New(o)
+    o = o or {}
+    setmetatable(o, self)
+    self.__index = self
+    return o
+end
+
+---@class RGBAColor: RGBColor
+---@field A number
+local RGBAColor = {};
+function RGBAColor:Spread()
+    return self.R, self.G, self.B, self.A
+end
+
+---@param o RGBAColor
+function RGBAColor:New(o)
+    o = o or {}
+    setmetatable(o, self)
+    self.__index = self
+    return o
+end
+
+---@class NamePlateAnimation
+---@field NamePlate NamePlateBase
+---@field Duration number The total duration of the animation
+---@field startTime number The start time of the animation
+local NamePlateAnimation = {};
+
+---@param o NamePlateAnimation
+function NamePlateAnimation:New(o)
+    o = o or {}
+    setmetatable(o, self)
+    self.__index = self
+    return o
+end
+
+function NamePlateAnimation:ReadyToAnimate()
+    return self.NamePlate and self.Duration and true
+end
+
+
+----------
+-- MAIN --
+----------
 local helper = {}
 
+---@param hex string Color in hexadecimal format
+---@return RGBAColor
 function helper.HexToRGB(hex)
-    return tonumber(hex:sub(1,2), 16)/255, tonumber(hex:sub(3,4), 16)/255, tonumber(hex:sub(5,6), 16)/255, 1;
+    return RGBAColor:New({
+        R = tonumber(hex:sub(1,2), 16)/255,
+        G = tonumber(hex:sub(3,4), 16)/255,
+        B = tonumber(hex:sub(5,6), 16)/255,
+        A = 1,
+    })
+end
+
+---@param animation NamePlateAnimation
+function helper.AnimationOnUpdate(animation)
+    if not animation:ReadyToAnimate() then
+        return
+    end
+
+    local currentTime = GetTime()
+    if not animation.startTime then
+        animation.startTime = currentTime
+    end
+
+    local elapsed = currentTime - animation.startTime;
+    if (elapsed > animation.Duration) then
+        -- the animation is over
+        --recycleFontString(fontString);
+
+    else
+        local animProgressPct = elapsed / animation.Duration
+        local newRGBA = RGBAColor:New({
+            R = 200, -- TODO: Maybe do dynamic colors based on spell damage type / school?
+            G = 0,
+            B = 0,
+            A = animProgressPct
+        })
+
+        animation.NamePlate.UnitFrame.healthBar.border:SetVertexColor(newRGBA:Spread())
+
+        -- sizing
+        if (fontString.pow) then
+            local iconScale = NameplateSCT.db.global.iconScale
+            local height = fontString.startHeight
+            if (elapsed < fontString.animatingDuration/6) then
+                fontString:SetText(fontString.NSCTText);
+
+                local size = powSizing(elapsed, fontString.animatingDuration/6, height/2, height*2, height);
+                fontString:SetTextHeight(size);
+                if fontString.icon then
+                    if MSQ and NameplateSCT.db.global.enableMSQ then
+                        fontString.icon.button:SetSize(size*iconScale, size*iconScale);
+                    else
+                        fontString.icon:SetSize(size*iconScale, size*iconScale);
+                    end
+                end
+            else
+                fontString.pow = nil;
+                fontString:SetTextHeight(height);
+                fontString:SetFont(getFontPath(NameplateSCT.db.global.font), fontString.NSCTFontSize, NameplateSCT.db.global.fontFlag);
+                if NameplateSCT.db.global.textShadow then fontString:SetShadowOffset(1,-1) else fontString:SetShadowOffset(0, 0) end
+                fontString:SetText(fontString.NSCTText);
+                if fontString.icon then
+                    if MSQ and NameplateSCT.db.global.enableMSQ then
+                        fontString.icon.button:SetSize(height*iconScale, height*iconScale);
+                    else
+                        fontString.icon:SetSize(height*iconScale, height*iconScale);
+                    end
+                end
+            end
+        end
+
+        -- position
+        local xOffset, yOffset = 0, 0;
+        if (fontString.animation == "verticalUp") then
+            xOffset, yOffset = verticalPath(elapsed, fontString.animatingDuration, fontString.distance);
+        elseif (fontString.animation == "verticalDown") then
+            xOffset, yOffset = verticalPath(elapsed, fontString.animatingDuration, -fontString.distance);
+        elseif (fontString.animation == "fountain") then
+            xOffset, yOffset = arcPath(elapsed, fontString.animatingDuration, fontString.arcXDist, 0, fontString.arcTop, fontString.arcBottom);
+        elseif (fontString.animation == "rainfall") then
+            _, yOffset = verticalPath(elapsed, fontString.animatingDuration, -fontString.distance);
+            xOffset = fontString.rainfallX;
+            yOffset = yOffset + fontString.rainfallStartY;
+            -- elseif (fontString.animation == "shake") then
+            -- TODO
+        elseif (fontString.animation == "boom") then
+            -- elseif (fontString.animation == "shake") then
+        end
+
+        if (not UnitIsDead(fontString.unit) and fontString.anchorFrame and fontString.anchorFrame:IsShown()) then
+            if fontString.unit == "player" then -- player frame
+                fontString:SetPoint("CENTER", fontString.anchorFrame, "CENTER", NameplateSCT.db.global.xOffsetPersonal + xOffset, NameplateSCT.db.global.yOffsetPersonal + yOffset); -- Only allows for adjusting vertical offset
+            else -- nameplate frames
+                fontString:SetPoint("CENTER", fontString.anchorFrame, "CENTER", NameplateSCT.db.global.xOffset + xOffset, NameplateSCT.db.global.yOffset + yOffset);
+            end
+        else
+            recycleFontString(fontString);
+        end
+    end
+
+    if MSQ and NameplateSCT.db.global.enableMSQ then
+        NameplateSCT.frame.MSQGroup:ReSkin()
+    end
+
 end
 
 AnimationHelper = helper
+
